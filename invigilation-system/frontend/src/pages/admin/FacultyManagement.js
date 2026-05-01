@@ -97,6 +97,29 @@ export default function FacultyManagement() {
     f.designation.toLowerCase().includes(search.toLowerCase())
   );
 
+  const fileInputRef = React.useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    setUploading(true);
+    try {
+      const res = await api.upload('/faculty-upload', formData);
+      toast.success(res.message);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
   return (
     <div style={{ padding: 32, color: '#e2e8f0' }}>
       {/* Header */}
@@ -105,7 +128,23 @@ export default function FacultyManagement() {
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#f1f5f9', margin: 0 }}>Faculty Management</h1>
           <p style={{ color: '#64748b', marginTop: 4, fontSize: 14 }}>{faculty.length} faculty members registered</p>
         </div>
-        <button onClick={openAdd} style={btnPrimary}>+ Add Faculty</button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".csv,.xls,.xlsx"
+            style={{ display: 'none' }}
+          />
+          <button 
+            onClick={() => fileInputRef.current.click()} 
+            disabled={uploading}
+            style={btnSecondary}
+          >
+            {uploading ? '⏳ Uploading...' : '📤 Upload CSV'}
+          </button>
+          <button onClick={openAdd} style={btnPrimary}>+ Add Faculty</button>
+        </div>
       </div>
 
       {/* Search */}

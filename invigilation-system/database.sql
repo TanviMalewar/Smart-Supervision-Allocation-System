@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS public.faculty (
   email           TEXT,
   phone           TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ DEFAULT NOW()
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (name)
 );
 
 -- 2c. subjects taught by each faculty member
@@ -64,7 +65,8 @@ CREATE TABLE IF NOT EXISTS public.exams (
   rooms_required         INTEGER NOT NULL DEFAULT 1,
   subject_faculty_name   TEXT,
   subject_faculty_mobile TEXT,
-  created_at             TIMESTAMPTZ DEFAULT NOW()
+  created_at             TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (course_code)
 );
 
 -- 2f. allocations  (created AFTER faculty + exams so FKs resolve)
@@ -123,28 +125,34 @@ ALTER TABLE public.employment_type_weights ENABLE ROW LEVEL SECURITY;
 -- Step 5: RLS POLICIES  (drop-then-create so script is re-runnable)
 -- ============================================================
 
+-- Security Definer function to avoid RLS recursion on users table
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS '
+  SELECT EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = auth.uid() AND role = ''admin''
+  );
+' LANGUAGE sql SECURITY DEFINER;
+
 -- users
-DROP POLICY IF EXISTS "users_self_select"  ON public.users;
-DROP POLICY IF EXISTS "users_admin_all"    ON public.users;
-CREATE POLICY "users_self_select" ON public.users FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "users_admin_all"   ON public.users FOR ALL   USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+DROP POLICY IF EXISTS "users_read_all" ON public.users;
+DROP POLICY IF EXISTS "users_self_update" ON public.users;
+DROP POLICY IF EXISTS "users_admin_all" ON public.users;
+
+CREATE POLICY "users_read_all" ON public.users FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "users_self_update" ON public.users FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "users_admin_all" ON public.users FOR ALL USING (public.is_admin());
 
 -- faculty
 DROP POLICY IF EXISTS "faculty_admin_all"    ON public.faculty;
 DROP POLICY IF EXISTS "faculty_self_select"  ON public.faculty;
-CREATE POLICY "faculty_admin_all"   ON public.faculty FOR ALL    USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "faculty_admin_all"   ON public.faculty FOR ALL    USING (public.is_admin());
 CREATE POLICY "faculty_self_select" ON public.faculty FOR SELECT USING (user_id = auth.uid());
 
 -- subjects
 DROP POLICY IF EXISTS "subjects_admin_all"   ON public.subjects;
 DROP POLICY IF EXISTS "subjects_own_all"     ON public.subjects;
-CREATE POLICY "subjects_admin_all" ON public.subjects FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "subjects_admin_all" ON public.subjects FOR ALL USING (public.is_admin());
 CREATE POLICY "subjects_own_all" ON public.subjects FOR ALL USING (
   faculty_id IN (SELECT id FROM public.faculty WHERE user_id = auth.uid())
 );
@@ -152,9 +160,7 @@ CREATE POLICY "subjects_own_all" ON public.subjects FOR ALL USING (
 -- availability
 DROP POLICY IF EXISTS "avail_admin_all"  ON public.availability;
 DROP POLICY IF EXISTS "avail_own_all"    ON public.availability;
-CREATE POLICY "avail_admin_all" ON public.availability FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "avail_admin_all" ON public.availability FOR ALL USING (public.is_admin());
 CREATE POLICY "avail_own_all" ON public.availability FOR ALL USING (
   faculty_id IN (SELECT id FROM public.faculty WHERE user_id = auth.uid())
 );
@@ -162,17 +168,13 @@ CREATE POLICY "avail_own_all" ON public.availability FOR ALL USING (
 -- exams
 DROP POLICY IF EXISTS "exams_admin_all"      ON public.exams;
 DROP POLICY IF EXISTS "exams_auth_select"    ON public.exams;
-CREATE POLICY "exams_admin_all"   ON public.exams FOR ALL    USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "exams_admin_all"   ON public.exams FOR ALL    USING (public.is_admin());
 CREATE POLICY "exams_auth_select" ON public.exams FOR SELECT USING (auth.role() = 'authenticated');
 
 -- allocations
 DROP POLICY IF EXISTS "alloc_admin_all"     ON public.allocations;
 DROP POLICY IF EXISTS "alloc_own_select"    ON public.allocations;
-CREATE POLICY "alloc_admin_all"  ON public.allocations FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "alloc_admin_all"  ON public.allocations FOR ALL USING (public.is_admin());
 CREATE POLICY "alloc_own_select" ON public.allocations FOR SELECT USING (
   faculty_id IN (SELECT id FROM public.faculty WHERE user_id = auth.uid())
 );
@@ -181,9 +183,7 @@ CREATE POLICY "alloc_own_select" ON public.allocations FOR SELECT USING (
 DROP POLICY IF EXISTS "weights_auth_select"  ON public.employment_type_weights;
 DROP POLICY IF EXISTS "weights_admin_all"    ON public.employment_type_weights;
 CREATE POLICY "weights_auth_select" ON public.employment_type_weights FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "weights_admin_all"   ON public.employment_type_weights FOR ALL    USING (
-  EXISTS (SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin')
-);
+CREATE POLICY "weights_admin_all"   ON public.employment_type_weights FOR ALL    USING (public.is_admin());
 
 -- ============================================================
 -- Step 6: TRIGGER — auto-update faculty.updated_at

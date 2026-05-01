@@ -49,7 +49,7 @@ export default function Login() {
             fontSize: 28,
           }}>📋</div>
           <h1 style={{ color: '#f1f5f9', fontSize: 24, fontWeight: 700, margin: 0 }}>
-            InvigilateAI
+            InvigilateX
           </h1>
           <p style={{ color: '#64748b', fontSize: 14, marginTop: 6 }}>
             Invigilation Duty Allocation System

@@ -79,67 +79,80 @@ async function generateInvigilationDuty() {
   const skippedExams  = [];
   let   totalAssigned = 0;
 
-  // ── Process each exam ────────────────────────────────────
+  // ── Group exams by slot ─────────────────────────────────
+  const slots = {};
   for (const exam of exams) {
-    const dateStr  = exam.date;
-    const slotKey  = `${dateStr}__${exam.session}`;
-    const examCode = (exam.course_code || '').toUpperCase();
-    let   roomsLeft = exam.rooms_required || 1;
+    const key = `${exam.date}__${exam.session}`;
+    if (!slots[key]) slots[key] = [];
+    slots[key].push({ ...exam, roomsLeft: exam.rooms_required || 1 });
+  }
 
-    // ── Step A: Subject faculty gets FIRST slot (mandatory) ──
-    if (exam.subject_faculty_name) {
-      const norm = normName(exam.subject_faculty_name);
-      const candidates = byName[norm] || [];
+  // ── Process each slot (Date + Session) ───────────────────
+  const sortedSlots = Object.keys(slots).sort();
+  for (const slotKey of sortedSlots) {
+    const slotExams = slots[slotKey];
+    const dateStr = slotKey.split('__')[0];
 
-      for (const f of candidates) {
-        if (roomsLeft <= 0) break;
-        if (f.duty_count >= f.max_duty)             continue; // over limit
-        if (f.assignedSlots.has(slotKey))           continue; // already this slot
-        if (availMap[f.id]?.[dateStr] === 'unavailable') continue; // marked off
+    // ── Phase 1: Assign Subject Faculty (Mandatory Priority) ──
+    // Each faculty member can only do ONE duty per slot.
+    // We try to match them to their own subject first.
+    for (const exam of slotExams) {
+      const examCode = exam.course_code.toUpperCase();
+      
+      // Potential subject faculty for THIS exam
+      const subjectFaculty = state.filter(f => {
+        if (f.duty_count >= f.max_duty)               return false;
+        if (f.assignedSlots.has(slotKey))             return false;
+        if (availMap[f.id]?.[dateStr] === 'unavailable') return false;
+        // Does this faculty teach this subject? (based on subjects table)
+        return f.subjectCodes.has(examCode);
+      });
+
+      // Assign them (one per room, up to roomsLeft)
+      for (const f of subjectFaculty) {
+        if (exam.roomsLeft <= 0) break;
+        if (f.assignedSlots.has(slotKey)) continue; // Double check
 
         allocations.push({ faculty_id: f.id, exam_id: exam.id });
         f.assignedSlots.add(slotKey);
         f.duty_count++;
         totalAssigned++;
-        roomsLeft--;
+        exam.roomsLeft--;
       }
     }
 
-    if (roomsLeft <= 0) continue; // all rooms filled by subject faculty
+    // ── Phase 2: Fill remaining rooms greedily ──────────────
+    for (const exam of slotExams) {
+      if (exam.roomsLeft <= 0) continue;
 
-    // ── Step B: Fill remaining rooms greedily ────────────────
-    const eligible = state.filter(f => {
-      if (f.duty_count >= f.max_duty)               return false;
-      if (f.assignedSlots.has(slotKey))             return false;
-      if (availMap[f.id]?.[dateStr] === 'unavailable') return false;
-      // Don't double-count subject faculty already assigned above
-      if (allocations.some(a => a.faculty_id === f.id && a.exam_id === exam.id)) return false;
-      return true;
-    });
-
-    // Sort: subject-code match first → fewest duties → employment priority
-    eligible.sort((a, b) => {
-      const aMatch = a.subjectCodes.has(examCode) ? 0 : 1;
-      const bMatch = b.subjectCodes.has(examCode) ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-      if (a.duty_count !== b.duty_count) return a.duty_count - b.duty_count;
-      return (EMPLOYMENT_PRIORITY[a.employment_type] || 9) - (EMPLOYMENT_PRIORITY[b.employment_type] || 9);
-    });
-
-    const toAssign = eligible.slice(0, roomsLeft);
-    for (const f of toAssign) {
-      allocations.push({ faculty_id: f.id, exam_id: exam.id });
-      f.assignedSlots.add(slotKey);
-      f.duty_count++;
-      totalAssigned++;
-      roomsLeft--;
-    }
-
-    if (roomsLeft > 0) {
-      skippedExams.push({
-        exam,
-        reason: `Only ${exam.rooms_required - roomsLeft}/${exam.rooms_required} rooms staffed`,
+      const eligible = state.filter(f => {
+        if (f.duty_count >= f.max_duty)               return false;
+        if (f.assignedSlots.has(slotKey))             return false;
+        if (availMap[f.id]?.[dateStr] === 'unavailable') return false;
+        return true;
       });
+
+      // Sort: Fair rotation (fewest duties) -> Employment priority
+      eligible.sort((a, b) => {
+        if (a.duty_count !== b.duty_count) return a.duty_count - b.duty_count;
+        return (EMPLOYMENT_PRIORITY[a.employment_type] || 9) - (EMPLOYMENT_PRIORITY[b.employment_type] || 9);
+      });
+
+      const toAssign = eligible.slice(0, exam.roomsLeft);
+      for (const f of toAssign) {
+        allocations.push({ faculty_id: f.id, exam_id: exam.id });
+        f.assignedSlots.add(slotKey);
+        f.duty_count++;
+        totalAssigned++;
+        exam.roomsLeft--;
+      }
+
+      if (exam.roomsLeft > 0) {
+        skippedExams.push({
+          exam,
+          reason: `Only ${exam.rooms_required - exam.roomsLeft}/${exam.rooms_required} rooms staffed`,
+        });
+      }
     }
   }
 

@@ -15,6 +15,7 @@ const subjectRoutes = require('./routes/subjects');
 const availabilityRoutes = require('./routes/availability');
 const examRoutes = require('./routes/exams');
 const uploadRoutes = require('./routes/upload');
+const facultyUploadRoutes = require('./routes/faculty_upload');
 const allocationRoutes = require('./routes/allocation');
 const reportRoutes = require('./routes/report');
 
@@ -50,6 +51,7 @@ app.use('/api/subjects', subjectRoutes);          // CRUD /api/subjects
 app.use('/api/availability', availabilityRoutes); // /api/availability
 app.use('/api/exams', examRoutes);                // CRUD /api/exams
 app.use('/api/upload', uploadRoutes);             // POST /api/upload
+app.use('/api/faculty-upload', facultyUploadRoutes); // POST /api/faculty-upload
 app.use('/api', allocationRoutes);                // POST /api/generate-allocation, GET /api/allocations
 app.use('/api/report', reportRoutes);             // GET /api/report
 

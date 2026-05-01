@@ -83,7 +83,7 @@ export default function UploadTimetable() {
             { from: 'Course Name', to: 'subject_name', note: 'Full subject name' },
             { from: 'Day and Date', to: 'date', note: '"Thu, 07/05/2026" → 2026-05-07' },
             { from: 'Time', to: 'session', note: 'AM start → FN, PM start → AN' },
-            { from: 'COUNT', to: 'rooms_required', note: 'ceil(COUNT / 30) invigilators' },
+            { from: 'COUNT', to: 'rooms_required', note: 'ceil(COUNT / 36) invigilators' },
           ].map(m => (
             <div key={m.from} style={{ background: '#0f172a', borderRadius: 8, padding: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>

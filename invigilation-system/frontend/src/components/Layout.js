@@ -63,7 +63,7 @@ export default function Layout({ children }) {
           }}>📋</div>
           {sidebarOpen && (
             <div>
-              <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 14 }}>InvigilateAI</div>
+              <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 14 }}>InvigilateX</div>
               <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 {role === 'admin' ? 'Administrator' : 'Faculty'}
               </div>

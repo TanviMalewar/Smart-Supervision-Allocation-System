@@ -73,6 +73,7 @@ function normaliseRow(row) {
   const count   = get(row, 'COUNT', 'count', 'Student Count', 'student count', 'students');
   const facName = get(row, 'Faculty Name', 'faculty name', 'faculty');
   const facMob  = get(row, 'Mobile No.', 'Mobile No', 'mobile no', 'mobile', 'Mobile');
+  const facDept = get(row, 'Department', 'Dept', 'dept', 'department');
   const session = parseSession(time);
 
   if (!date || !code || !name) return null;
@@ -85,6 +86,7 @@ function normaliseRow(row) {
     rooms_required:         calcRooms(count),
     subject_faculty_name:   facName || null,
     subject_faculty_mobile: facMob  || null,
+    department:             facDept || 'General',
   };
 }
 
@@ -106,21 +108,144 @@ router.post('/', authenticate, requireAdmin, upload.single('file'), async (req, 
     return res.status(400).json({ error: `Parse failed: ${e.message}` });
   }
 
-  const valid = rawRows.map(normaliseRow).filter(Boolean);
-
-  if (valid.length === 0)
+  const normalized = rawRows.map(normaliseRow).filter(Boolean);
+  if (normalized.length === 0)
     return res.status(400).json({ error: 'No valid rows found. Check column headers.' });
 
-  const { data, error } = await supabase.from('exams').insert(valid).select();
-  if (error) return res.status(500).json({ error: error.message });
+  // ── 1. Aggregate and Deduplicate by course_code ───────────
+  // We sum the 'count' (students) for multiple rows of same code
+  const aggregated = new Map();
+  
+  for (const row of rawRows) {
+    const code = get(row, 'Code', 'code', 'course_code', 'Course Code');
+    if (!code) continue;
+    
+    const codeUpper = code.toUpperCase().trim();
+    const count = parseInt(get(row, 'COUNT', 'count', 'Student Count', 'student count', 'students'), 10) || 0;
+    
+    if (aggregated.has(codeUpper)) {
+      const existing = aggregated.get(codeUpper);
+      existing.totalCount += count;
+      // Keep first non-null faculty if current is null
+      if (!existing.subject_faculty_name) {
+        existing.subject_faculty_name = get(row, 'Faculty Name', 'faculty name', 'faculty');
+        existing.subject_faculty_mobile = get(row, 'Mobile No.', 'Mobile No', 'mobile no', 'mobile', 'Mobile');
+      }
+    } else {
+      const norm = normaliseRow(row);
+      if (norm) {
+        aggregated.set(codeUpper, {
+          ...norm,
+          totalCount: count,
+          department: get(row, 'Department', 'Dept', 'dept', 'department') || 'General'
+        });
+      }
+    }
+  }
 
-  res.json({
-    message:      `Imported ${data.length} exam records`,
-    imported:     data.length,
-    total_parsed: rawRows.length,
-    skipped:      rawRows.length - valid.length,
-    sample:       data.slice(0, 3),
-  });
+  const uniqueExams = Array.from(aggregated.values()).map(ex => ({
+    date:                   ex.date,
+    session:                ex.session,
+    subject_name:           ex.subject_name,
+    course_code:            ex.course_code,
+    rooms_required:         calcRooms(ex.totalCount),
+    subject_faculty_name:   ex.subject_faculty_name,
+    subject_faculty_mobile: ex.subject_faculty_mobile,
+    department:             ex.department,
+  }));
+
+  try {
+    // ── 2. Clear old allocations, exams, and subjects (START FRESH) ───
+    await supabase.from('allocations').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('exams').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('subjects').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    // Optional: Clear dummy faculty (only those without a linked user_id)
+    // await supabase.from('faculty').delete().is('user_id', null);
+
+    // ── 3. Handle Faculty & Subjects ────────────────────────
+    const { data: existingFaculty } = await supabase.from('faculty').select('id, name, department, phone');
+    const facultyMap = new Map(existingFaculty?.map(f => [f.name.toLowerCase().trim(), f]));
+
+    for (const exam of uniqueExams) {
+      if (!exam.subject_faculty_name) continue;
+
+      // Split names by / or , or ;
+      const names = exam.subject_faculty_name.split(/[/\,;]/).map(n => n.trim()).filter(Boolean);
+      const deptFromCsv = exam.department || 'General';
+
+      for (const name of names) {
+        const nameLower = name.toLowerCase();
+        let faculty = facultyMap.get(nameLower);
+
+        // Create faculty if they don't exist
+        if (!faculty) {
+          const { data: newFac, error: facErr } = await supabase
+            .from('faculty')
+            .insert({
+              name:            name,
+              department:      deptFromCsv,
+              designation:     'Faculty',
+              employment_type: 'type4', 
+              max_duty:        10,
+              email:           '',
+              phone:           exam.subject_faculty_mobile
+            })
+            .select()
+            .single();
+
+          if (facErr) {
+            console.error(`Failed to create faculty ${name}:`, facErr.message);
+            continue;
+          }
+
+          if (newFac) {
+            faculty = newFac;
+            facultyMap.set(nameLower, faculty);
+          }
+        } else {
+          // UPDATE existing faculty if department is "General" or phone is missing
+          const needsUpdate = (faculty.department === 'General' && deptFromCsv !== 'General') || (!faculty.phone && exam.subject_faculty_mobile);
+          
+          if (needsUpdate) {
+            const updateData = {};
+            if (faculty.department === 'General' && deptFromCsv !== 'General') updateData.department = deptFromCsv;
+            if (!faculty.phone && exam.subject_faculty_mobile) updateData.phone = exam.subject_faculty_mobile;
+
+            await supabase.from('faculty').update(updateData).eq('id', faculty.id);
+            // Update local map
+            Object.assign(faculty, updateData);
+          }
+        }
+
+        // Link subject to faculty
+        if (faculty?.id) {
+          await supabase.from('subjects').upsert({
+            faculty_id:   faculty.id,
+            course_code:  exam.course_code,
+            subject_name: exam.subject_name
+          }, { onConflict: 'faculty_id,course_code' });
+        }
+      }
+    }
+
+    // ── 4. Insert deduplicated exams ────────────────────────
+    // Remove extra fields (like department) before inserting into 'exams' table
+    const examsToInsert = uniqueExams.map(({ department, ...rest }) => rest);
+    const { data, error } = await supabase.from('exams').insert(examsToInsert).select();
+    if (error) throw error;
+
+    res.json({
+      message:      `Imported ${data.length} unique exams and synced faculty database`,
+      imported:     data.length,
+      total_parsed: rawRows.length,
+      aggregated:   rawRows.length - uniqueExams.length,
+    });
+
+  } catch (err) {
+    console.error('Import Error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
