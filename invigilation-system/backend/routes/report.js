@@ -104,4 +104,139 @@ router.get('/summary', authenticate, async (req, res) => {
   res.json(data);
 });
 
+/**
+ * GET /api/report/date-wise
+ * Returns allocations grouped by date → session → exam,
+ * each exam listing all assigned faculties and their allocation type.
+ */
+router.get('/date-wise', authenticate, async (req, res) => {
+  const { data, error } = await supabase
+    .from('allocations')
+    .select(`
+      faculty:faculty_id (id, name, department, designation, employment_type, phone),
+      exam:exam_id (date, session, subject_name, course_code, subject_faculty_name)
+    `);
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Build a nested map: date → session → courseCode → { examMeta, faculties[] }
+  const dateMap = {};
+  for (const r of data) {
+    if (!r.faculty || !r.exam) continue;
+    const { date, session, subject_name, course_code, subject_faculty_name } = r.exam;
+    const dateLabel = formatDate(date);
+    const rawDate   = date;
+
+    if (!dateMap[rawDate]) dateMap[rawDate] = { label: dateLabel, rawDate, sessions: {} };
+    if (!dateMap[rawDate].sessions[session]) dateMap[rawDate].sessions[session] = {};
+
+    const key = course_code || subject_name;
+    if (!dateMap[rawDate].sessions[session][key]) {
+      dateMap[rawDate].sessions[session][key] = {
+        courseCode: course_code,
+        courseName: subject_name,
+        time: sessionToTime(session),
+        faculties: [],
+      };
+    }
+    const allocType = r.faculty.name.trim() === (subject_faculty_name || '').trim()
+      ? 'Subject Faculty' : 'Other Faculty';
+    const facList = dateMap[rawDate].sessions[session][key].faculties;
+    const facKey  = (r.faculty.name || '').trim().toLowerCase();
+    // Skip if this faculty (by normalised name) is already listed for this exam
+    if (!facList.some(f => (f.name || '').trim().toLowerCase() === facKey)) {
+      facList.push({
+        name:           r.faculty.name.trim(),
+        department:     r.faculty.department,
+        designation:    r.faculty.designation,
+        employmentType: r.faculty.employment_type,
+        phone:          r.faculty.phone || '',
+        allocationType: allocType,
+      });
+    }
+  }
+
+  // Convert to sorted array
+  const result = Object.values(dateMap)
+    .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
+    .map(d => ({
+      date:     d.label,
+      rawDate:  d.rawDate,
+      sessions: ['FN', 'AN']
+        .filter(s => d.sessions[s])
+        .map(s => ({
+          session: s,
+          time:    sessionToTime(s),
+          exams:   Object.values(d.sessions[s]),
+        })),
+    }));
+
+  res.json(result);
+});
+
+/**
+ * GET /api/report/faculty-wise
+ * Returns allocations grouped by faculty,
+ * each faculty listing all dates + exams they're assigned to.
+ */
+router.get('/faculty-wise', authenticate, async (req, res) => {
+  const { data, error } = await supabase
+    .from('allocations')
+    .select(`
+      faculty:faculty_id (id, name, department, designation, employment_type, phone),
+      exam:exam_id (date, session, subject_name, course_code, subject_faculty_name)
+    `);
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Group by normalised name so duplicate DB records are merged into one card
+  const facultyMap = {};
+  for (const r of data) {
+    if (!r.faculty || !r.exam) continue;
+    // Normalise: trim + lowercase → merge duplicates with same name
+    const key = (r.faculty.name || '').trim().toLowerCase();
+    if (!facultyMap[key]) {
+      facultyMap[key] = {
+        name:           r.faculty.name.trim(),
+        department:     r.faculty.department,
+        designation:    r.faculty.designation,
+        employmentType: r.faculty.employment_type,
+        phone:          r.faculty.phone || '',
+        assignments:    [],
+      };
+    }
+    const allocType = r.faculty.name.trim() === (r.exam.subject_faculty_name || '').trim()
+      ? 'Subject Faculty' : 'Other Faculty';
+
+    // Avoid adding the exact same duty twice (same date+session+course)
+    const dupKey = `${r.exam.date}|${r.exam.session}|${r.exam.course_code}`;
+    const alreadyAdded = facultyMap[key].assignments.some(
+      a => `${a.rawDate}|${a.session}|${a.courseCode}` === dupKey
+    );
+    if (!alreadyAdded) {
+      facultyMap[key].assignments.push({
+        date:           formatDate(r.exam.date),
+        rawDate:        r.exam.date,
+        session:        r.exam.session,
+        time:           sessionToTime(r.exam.session),
+        courseCode:     r.exam.course_code,
+        courseName:     r.exam.subject_name,
+        allocationType: allocType,
+      });
+    }
+  }
+
+  // Sort each faculty's assignments by date → session
+  const result = Object.values(facultyMap)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(f => ({
+      ...f,
+      assignments: f.assignments.sort((a, b) =>
+        a.rawDate !== b.rawDate
+          ? a.rawDate.localeCompare(b.rawDate)
+          : a.session.localeCompare(b.session)
+      ),
+    }));
+
+  res.json(result);
+});
+
 module.exports = router;
