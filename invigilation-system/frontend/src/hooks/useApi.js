@@ -1,5 +1,6 @@
 // frontend/src/hooks/useApi.js
 // Central API call utility that injects the Supabase JWT automatically
+import { useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
@@ -7,7 +8,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 export function useApi() {
   const { getToken } = useAuth();
 
-  const call = async (method, path, body = null, isFormData = false) => {
+  const call = useCallback(async (method, path, body = null, isFormData = false) => {
     const token = await getToken();
     const headers = { Authorization: `Bearer ${token}` };
     if (!isFormData) headers['Content-Type'] = 'application/json';
@@ -20,9 +21,9 @@ export function useApi() {
 
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     return data;
-  };
+  }, [getToken]);
 
-  const download = async (path) => {
+  const download = useCallback(async (path) => {
     const token = await getToken();
     const res = await fetch(`${API_URL}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -35,14 +36,14 @@ export function useApi() {
     a.download = `invigilation_report_${Date.now()}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
-  };
+  }, [getToken]);
 
-  return {
-    get: (path) => call('GET', path),
-    post: (path, body) => call('POST', path, body),
-    put: (path, body) => call('PUT', path, body),
-    del: (path) => call('DELETE', path),
-    upload: (path, formData) => call('POST', path, formData, true),
-    download,
-  };
+  const get      = useCallback((path)        => call('GET',    path),             [call]);
+  const post     = useCallback((path, body)  => call('POST',   path, body),       [call]);
+  const put      = useCallback((path, body)  => call('PUT',    path, body),       [call]);
+  const del      = useCallback((path)        => call('DELETE', path),             [call]);
+  const upload   = useCallback((path, fd)    => call('POST',   path, fd, true),   [call]);
+
+  return { get, post, put, del, upload, download };
 }
+

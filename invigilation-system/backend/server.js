@@ -17,7 +17,8 @@ const examRoutes = require('./routes/exams');
 const uploadRoutes = require('./routes/upload');
 const facultyUploadRoutes = require('./routes/faculty_upload');
 const allocationRoutes = require('./routes/allocation');
-const reportRoutes = require('./routes/report');
+const reportRoutes  = require('./routes/report');
+const reexamRoutes  = require('./routes/reexam');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -32,10 +33,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Global rate limiter: 200 requests / 15 min per IP
+// Global rate limiter: 200 requests / 15 min per IP (bypassed in development)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: process.env.NODE_ENV === 'production' ? 200 : 99999,
   message: { error: 'Too many requests, please try again later.' },
 });
 app.use(limiter);
@@ -54,6 +55,7 @@ app.use('/api/upload', uploadRoutes);             // POST /api/upload
 app.use('/api/faculty-upload', facultyUploadRoutes); // POST /api/faculty-upload
 app.use('/api', allocationRoutes);                // POST /api/generate-allocation, GET /api/allocations
 app.use('/api/report', reportRoutes);             // GET /api/report
+app.use('/api/reexam', reexamRoutes);             // Re-Exam module
 
 // ── Health Check ────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

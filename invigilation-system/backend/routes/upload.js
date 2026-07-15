@@ -30,12 +30,29 @@ const upload = multer({
   },
 });
 
-// "Thursday, 07/05/2026" → "2026-05-07"
+// Handles "Thursday, 07/05/2026", "07/05/2026", Date objects, and ISO date strings
 function parseDate(raw) {
   if (!raw) return null;
-  const m = String(raw).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (raw instanceof Date) {
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const d = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(raw).trim();
+  if (str.includes('-') && !isNaN(Date.parse(str))) {
+    const dObj = new Date(str);
+    const y = dObj.getFullYear();
+    const m = String(dObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const m = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (!m) return null;
-  return `${m[3]}-${m[2]}-${m[1]}`;
+  const day = m[1].padStart(2, '0');
+  const month = m[2].padStart(2, '0');
+  const year = m[3];
+  return `${year}-${month}-${day}`;
 }
 
 // "10.30 AM to 12.30 PM" → FN,  "03.00 PM ..." → AN

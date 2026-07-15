@@ -12,6 +12,7 @@ import ExamSchedule from './pages/admin/ExamSchedule';
 import UploadTimetable from './pages/admin/UploadTimetable';
 import AllocationsView from './pages/admin/AllocationsView';
 import ReportPage from './pages/admin/ReportPage';
+import ReExamModule from './pages/admin/ReExamModule';
 import FacultyDashboard from './pages/faculty/FacultyDashboard';
 import AvailabilityCalendar from './pages/faculty/AvailabilityCalendar';
 import SubjectsPage from './pages/faculty/SubjectsPage';
@@ -91,6 +92,7 @@ export default function App() {
           <Route path="/admin/upload" element={<ProtectedRoute requiredRole="admin"><UploadTimetable /></ProtectedRoute>} />
           <Route path="/admin/allocations" element={<ProtectedRoute requiredRole="admin"><AllocationsView /></ProtectedRoute>} />
           <Route path="/admin/report" element={<ProtectedRoute requiredRole="admin"><ReportPage /></ProtectedRoute>} />
+          <Route path="/admin/reexam" element={<ProtectedRoute requiredRole="admin"><ReExamModule /></ProtectedRoute>} />
 
           <Route path="/faculty" element={<ProtectedRoute requiredRole="faculty"><FacultyDashboard /></ProtectedRoute>} />
           <Route path="/faculty/availability" element={<ProtectedRoute requiredRole="faculty"><AvailabilityCalendar /></ProtectedRoute>} />

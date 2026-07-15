@@ -9,6 +9,7 @@ const NAV_ADMIN = [
   { path: '/admin/faculty', label: 'Faculty', icon: '👥' },
   { path: '/admin/exams', label: 'Exam Schedule', icon: '📅' },
   { path: '/admin/upload', label: 'Upload Timetable', icon: '📤' },
+  { path: '/admin/reexam', label: 'Re-Exam', icon: '🔁' },
   { path: '/admin/allocations', label: 'Allocations', icon: '⚙️' },
   { path: '/admin/report', label: 'Reports', icon: '📊' },
 ];
